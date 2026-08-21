@@ -10,6 +10,11 @@
 #include <kmindex/exceptions.hpp>
 #include <kseq++/seqio.hpp>
 
+#include <algorithm>
+#include <cassert>
+#include <condition_variable>
+#include <mutex>
+
 #include <fmt/format.h>
 #include <spdlog/spdlog.h>
 
@@ -33,6 +38,39 @@ namespace kmq {
   using queue_type = atomic_queue::AtomicQueue2<
     fastx_record, queue_size, minimize_contention, maximize_throughput, total_ordering, spsc
   >;
+
+  class memory_semaphore
+  {
+  public:
+    explicit memory_semaphore(std::size_t budget) : m_budget(budget) {}
+    void acquire(std::size_t bytes)
+    {
+      std::unique_lock<std::mutex> lock(m_mutex);
+      m_cv.wait(lock, [this, bytes] { return m_budget == 0 || m_used + bytes <= m_budget; });
+      m_used += bytes;
+    }
+    void release(std::size_t bytes)
+    {
+      std::lock_guard<std::mutex> lock(m_mutex);
+      assert(m_used >= bytes);
+      m_used -= bytes;
+      m_cv.notify_all();
+    }
+  private:
+    std::mutex m_mutex;
+    std::condition_variable m_cv;
+    std::size_t m_budget {0};
+    std::size_t m_used {0};
+  };
+
+  struct sem_guard
+  {
+    memory_semaphore& sem;
+    std::size_t bytes;
+    sem_guard(const sem_guard&) = delete;
+    sem_guard& operator=(const sem_guard&) = delete;
+    ~sem_guard() { sem.release(bytes); }
+  };
 
   kmq_options_t kmq_query2_cli(parser_t parser, kmq_query2_options_t options)
   {
@@ -106,6 +144,12 @@ namespace kmq {
        ->hide()
        ->setter(options->uncompressed);
 
+    cmd->add_param("--memory-budget", "Total memory budget for concurrent sub-index queries in MB (heap + mmap working set). 0 = no limit.")
+       ->meta("INT")
+       ->def("0")
+       ->checker(bc::check::f::range(0, 100000000))
+       ->setter(options->memory_budget);
+
 
     add_common_options(cmd, options, true, 1);
 
@@ -122,7 +166,6 @@ namespace kmq {
     Timer load_time;
     index global(o->global_index_path);
     spdlog::info("Global index loaded ({}).", load_time.formatted());
-
     spdlog::info(
       "Global index: '{}'", fs::absolute(o->global_index_path + "/").parent_path().filename().string());
 
@@ -165,10 +208,88 @@ namespace kmq {
     }
 
     bool with_positions = o->format == format::json_with_positions || o->format == format::jsonl_with_positions;
-    for (auto& index_name : o->index_names)
+
+    std::size_t budget_bytes = o->memory_budget * 1024 * 1024;
+    if (budget_bytes > 0)
+      spdlog::info("Memory budget: {}MB", o->memory_budget);
+    memory_semaphore sem(budget_bytes);
+
+    // Memory estimate per sub-index = heap peak + mmap working set.
+    //
+    // Heap: two phases exist within each task:
+    //   Phase 1 (solve_batch): smers + query_response data both live on heap.
+    //   Phase 2 (agg building, after free_smers): query_response data moves into
+    //     query_result objects which add m_ratios (nb_samples * 8B), m_counts
+    //     (nb_samples * 4B), and m_positions (nb_samples * n_smers * 1B, position
+    //     formats only). For bw==1 the response data is freed during compute, so
+    //     phase 2 peak is positions + ratios + counts. For bw>1 response data
+    //     stays alive, so phase 2 peak is response data + positions + ratios + counts.
+    //   We take the max of both phases.
+    //
+    // Mmap: kindex mmaps bloom filter partitions. Without --fast, solve_one maps
+    //   one partition at a time then unmaps it, so peak mmap = bloom_size. With
+    //   --fast, all partitions are mapped upfront and stay resident.
+    //
+    //   For uncompressed indexes, mmap peak = bloom_size (no --fast) or
+    //   index_size (all partitions, --fast).
+    //
+    //   For compressed indexes, partitions are NOT mmap'd — BlockDecompressorZSTD
+    //   reads compressed files and decompresses into heap memory. kindex forces
+    //   m_cache=false for compressed indexes (ignoring --fast), so only one
+    //   partition is decompressed at a time regardless. Peak = bloom_size on heap.
+    //   We count it as mmap for simplicity — the total estimate is approximately
+    //   correct since we sum heap + mmap.
+    //
+    //   Mmap won't cause OOM (OS evicts pages), but too many concurrent indexes
+    //   cause page fault thrashing and I/O stalls. Gating on heap+mmap keeps the
+    //   working set within physical memory to avoid this.
+    std::vector<std::pair<std::string, std::size_t>> indexed_mem;
+    for (const auto& name : o->index_names)
     {
-      pool.add_task([&o, &global, &index_name, &records, with_positions](int i){
+      auto infos = global.get(name);
+      std::size_t ns = infos.nb_samples();
+      std::size_t block_size = ((ns * infos.bw()) + 7) / 8;
+      constexpr std::size_t smers_pair_size = sizeof(std::pair<smer, std::uint32_t>);
+      std::size_t phase1 = 0;
+      std::size_t phase2 = 0;
+      for (const auto& record : records)
+      {
+        if (record.seq.size() >= infos.smer_size() + o->z)
+        {
+          std::size_t n_smers = record.seq.size() - infos.smer_size() + 1;
+          std::size_t response_mem = n_smers * block_size;
+          std::size_t smers_mem = n_smers * smers_pair_size;
+          phase1 += response_mem + smers_mem;
+
+          std::size_t ratios_counts = ns * sizeof(double) + ns * sizeof(std::uint32_t);
+          std::size_t positions_mem = with_positions ? ns * n_smers : 0;
+          std::size_t response_in_agg = (infos.bw() > 1) ? response_mem : 0;
+          phase2 += response_in_agg + positions_mem + ratios_counts;
+        }
+      }
+      std::size_t heap_peak = std::max(phase1, phase2);
+      std::size_t mmap_peak;
+      if (infos.is_compressed_index())
+        mmap_peak = infos.bloom_size();
+      else
+        mmap_peak = o->cache ? infos.index_size() : infos.bloom_size();
+      indexed_mem.emplace_back(name, heap_peak + mmap_peak);
+    }
+
+    std::sort(indexed_mem.begin(), indexed_mem.end(),
+              [](const auto& a, const auto& b) { return a.second > b.second; });
+
+    for (auto& [index_name, mem] : indexed_mem)
+    {
+      std::size_t acquire_bytes = (budget_bytes > 0 && mem > budget_bytes) ? budget_bytes : mem;
+      if (acquire_bytes == budget_bytes && budget_bytes > 0)
+        spdlog::warn("Index '{}' memory requirement {:.2f}MB exceeds budget {}MB — will run alone",
+                     index_name, mem / (1024.0 * 1024.0), o->memory_budget);
+
+      pool.add_task([&o, &global, index_name, &records, with_positions, &sem, acquire_bytes](int i){
         unused(i);
+        sem.acquire(acquire_bytes);
+        sem_guard g{sem, acquire_bytes};
         Timer timer;
         auto infos = global.get(index_name);
         spdlog::info("Starting '{}' query ({} samples)", infos.name(), infos.nb_samples());
@@ -236,4 +357,3 @@ namespace kmq {
     spdlog::info("Done ({}).", gtime.formatted());
   }
 }
-
