@@ -52,6 +52,14 @@ namespace kmq {
       std::size_t aggregate(const std::vector<query_result>& queries, std::vector<uint32_t>& global);
 
       std::size_t aggregate_c(const std::vector<query_result>& queries, std::vector<uint32_t>& global, std::vector<double>& ratios);
+
+      std::vector<std::string> filter_threshold(
+          const std::vector<double>& ratios,
+          const std::vector<double>& display) const;
+
+      std::vector<std::string> filter_threshold(
+          const std::vector<double>& ratios,
+          const std::vector<std::uint32_t>& display) const;
     protected:
       double m_threshold {0};
   };

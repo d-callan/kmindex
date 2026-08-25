@@ -59,6 +59,16 @@ namespace kmq {
     return m_indexes.count(name) != 0;
   }
 
+  void index::merge(const index& other)
+  {
+    for (const auto& [name, infos] : other.m_indexes)
+    {
+      if (m_indexes.count(name))
+        throw std::runtime_error(fmt::format("Sub-index name collision: '{}' exists in multiple --index paths", name));
+      m_indexes[name] = infos;
+    }
+  }
+
   void index::remove_index(const std::string& name)
   {
     if (m_indexes.count(name))

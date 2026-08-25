@@ -21,6 +21,17 @@ ${kmindex_bin} query -i indexes/index \
                      -n abs \
                      -q datasets/abs_dataset/1.fasta \
                      -z 4 \
+                     -f matrix \
+                     -r 0.5 \
+                     -o out_tmp -t 1 2> /dev/null
+
+diff out_tmp/abs.tsv outputs/q1_z4_r05_abs.tsv || exit 1
+rm -rf out_tmp
+
+${kmindex_bin} query -i indexes/index \
+                     -n abs \
+                     -q datasets/abs_dataset/1.fasta \
+                     -z 4 \
                      -f json \
                      -o out_tmp -t 1 2> /dev/null
 

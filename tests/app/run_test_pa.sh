@@ -21,6 +21,29 @@ rm -rf out_tmp
 ${kmindex_bin} query -i indexes/index \
                      -n pa \
                      -q datasets/pa_dataset/1.fasta \
+                     -z 5 \
+                     -f matrix \
+                     -r 0.5 \
+                     -o out_tmp -t 1 2> /dev/null
+
+diff out_tmp/pa.tsv outputs/q1_z5_r05_pa.tsv || exit 1
+rm -rf out_tmp
+
+# Boundary: ratio == threshold is kept (>=)
+${kmindex_bin} query -i indexes/index \
+                     -n pa \
+                     -q datasets/pa_dataset/1.fasta \
+                     -z 5 \
+                     -f matrix \
+                     -r 1.0 \
+                     -o out_tmp -t 1 2> /dev/null
+
+diff out_tmp/pa.tsv outputs/q1_z5_r05_pa.tsv || exit 1
+rm -rf out_tmp
+
+${kmindex_bin} query -i indexes/index \
+                     -n pa \
+                     -q datasets/pa_dataset/1.fasta \
                      -z 4 \
                      -f json \
                      -r 0.5 \

@@ -75,7 +75,22 @@ if ! grep -q "will run alone" "$stderr_file"; then
 fi
 rm -f "$stderr_file"
 
-rm -rf out_zero out_noflag out_tiny out_fast_budget out_fast_nobudget out_pos_budget out_pos_nobudget out_oversized
+# Test 6: multi-index paths + memory budget produces same output as single global index
+# Verifies memory gating works with merged indexes from comma-separated --index paths
+rm -rf out_multi_budget out_single
+
+${kmindex_bin} query2 -i indexes/abs_global,indexes/pa_global \
+  -q datasets/pa_dataset/1.fasta \
+  -z 5 -f matrix -o out_multi_budget -t 2 --memory-budget 1 2> /dev/null
+
+${kmindex_bin} query2 -i indexes/index \
+  -q datasets/pa_dataset/1.fasta \
+  -z 5 -f matrix -o out_single -t 2 2> /dev/null
+
+diff out_multi_budget/abs.tsv out_single/abs.tsv || { echo "FAIL: multi-index+budget differs from single (abs)"; fail=1; }
+diff out_multi_budget/pa.tsv out_single/pa.tsv || { echo "FAIL: multi-index+budget differs from single (pa)"; fail=1; }
+
+rm -rf out_zero out_noflag out_tiny out_fast_budget out_fast_nobudget out_pos_budget out_pos_nobudget out_oversized out_multi_budget out_single
 
 if [ $fail -eq 0 ]; then
   echo "All query2 memory-gating tests passed."

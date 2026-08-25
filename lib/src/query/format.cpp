@@ -135,6 +135,38 @@ namespace kmq {
     return nbq;
   }
 
+  std::vector<std::string> query_formatter_base::filter_threshold(
+      const std::vector<double>& ratios,
+      const std::vector<double>& display) const
+  {
+    std::vector<std::string> values;
+    values.reserve(ratios.size());
+    for (std::size_t i = 0; i < ratios.size(); ++i)
+    {
+      if (ratios[i] >= m_threshold)
+        values.push_back(fmt::format("{}", display[i]));
+      else
+        values.push_back("NA");
+    }
+    return values;
+  }
+
+  std::vector<std::string> query_formatter_base::filter_threshold(
+      const std::vector<double>& ratios,
+      const std::vector<std::uint32_t>& display) const
+  {
+    std::vector<std::string> values;
+    values.reserve(ratios.size());
+    for (std::size_t i = 0; i < ratios.size(); ++i)
+    {
+      if (ratios[i] >= m_threshold)
+        values.push_back(fmt::format("{}", display[i]));
+      else
+        values.push_back("NA");
+    }
+    return values;
+  }
+
   matrix_formatter::matrix_formatter(double threshold)
     : query_formatter_base(threshold)
   {
@@ -150,7 +182,8 @@ namespace kmq {
                                 const query_result& response,
                                 std::ostream& os)
   {
-    os << fmt::format("{}:{}\t{}\n", infos.name(), response.name(), fmt::join(response.ratios(), "\t"));
+    auto values = filter_threshold(response.ratios(), response.ratios());
+    os << fmt::format("{}:{}\t{}\n", infos.name(), response.name(), fmt::join(values, "\t"));
   }
 
   void matrix_formatter::merge_format(const index_infos& infos,
@@ -166,7 +199,8 @@ namespace kmq {
     for (auto& c : global)
       ratios.push_back(c / static_cast<double>(nbk));
 
-    os << fmt::format("{}\t{}\n", name, fmt::join(ratios, "\t"));
+    auto values = filter_threshold(ratios, ratios);
+    os << fmt::format("{}\t{}\n", name, fmt::join(values, "\t"));
   }
 
   json_formatter::json_formatter(double threshold)
@@ -458,7 +492,8 @@ namespace kmq {
                                     const query_result& response,
                                     std::ostream& os)
   {
-    os << fmt::format("{}:{}\t{}\n", infos.name(), response.name(), fmt::join(response.counts(), "\t"));
+    auto values = filter_threshold(response.ratios(), response.counts());
+    os << fmt::format("{}:{}\t{}\n", infos.name(), response.name(), fmt::join(values, "\t"));
   }
 
   void matrix_formatter_abs::merge_format(const index_infos& infos,
@@ -475,7 +510,13 @@ namespace kmq {
     for (auto& c : global)
       c /= nbq;
 
-    os << fmt::format("{}:{}\t{}\n", infos.name(), name, fmt::join(global, "\t"));
+    std::vector<double> computed_ratios;
+    computed_ratios.reserve(infos.nb_samples());
+    for (std::size_t i = 0; i < infos.nb_samples(); ++i)
+      computed_ratios.push_back(ratios[i] / nbq);
+
+    auto values = filter_threshold(computed_ratios, global);
+    os << fmt::format("{}:{}\t{}\n", infos.name(), name, fmt::join(values, "\t"));
   }
 
 

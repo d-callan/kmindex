@@ -77,12 +77,21 @@ namespace kmq {
     auto cmd = parser->add_command("query2", "To be used instead of kmindex query when many sub-indexes are registered, i.e. hundreds or thousands.");
 
     auto is_kmq_index = [](const std::string& p, const std::string& v) -> bc::check::checker_ret_t {
-      return std::make_tuple(fs::exists(fmt::format("{}/index.json", v)), bc::utils::format_error(p, v, fmt::format("'{}' is not an index.", v)));
+      auto paths = bc::utils::split(v, ',');
+      for (const auto& path : paths)
+      {
+        if (!fs::exists(path))
+          return std::make_tuple(false, bc::utils::format_error(p, v, fmt::format("'{}' does not exist.", path)));
+        if (!fs::is_directory(path))
+          return std::make_tuple(false, bc::utils::format_error(p, v, fmt::format("'{}' is not a directory.", path)));
+        if (!fs::exists(fmt::format("{}/index.json", path)))
+          return std::make_tuple(false, bc::utils::format_error(p, v, fmt::format("'{}' is not a kmindex index (no index.json).", path)));
+      }
+      return std::make_tuple(true, "");
     };
 
-    cmd->add_param("-i/--index", "Global index path.")
+    cmd->add_param("-i/--index", "Global index path. Multiple comma-separated paths are merged (sub-indexes from all paths are queried together).")
        ->meta("STR")
-       ->checker(bc::check::is_dir)
        ->checker(is_kmq_index)
        ->setter(options->global_index_path);
 
@@ -164,10 +173,21 @@ namespace kmq {
 
     spdlog::info("Loading global index: {}", o->global_index_path);
     Timer load_time;
-    index global(o->global_index_path);
+    auto index_paths = bc::utils::split(o->global_index_path, ',');
+    index global(index_paths[0]);
+    for (std::size_t i = 1; i < index_paths.size(); ++i)
+    {
+      spdlog::info("Merging additional index: {}", index_paths[i]);
+      index other(index_paths[i]);
+      global.merge(other);
+    }
     spdlog::info("Global index loaded ({}).", load_time.formatted());
-    spdlog::info(
-      "Global index: '{}'", fs::absolute(o->global_index_path + "/").parent_path().filename().string());
+
+    if (index_paths.size() > 1)
+      spdlog::info("Global index: merged from {} paths", index_paths.size());
+    else
+      spdlog::info(
+        "Global index: '{}'", fs::absolute(o->global_index_path + "/").parent_path().filename().string());
 
     if (o->index_names.empty())
     {

@@ -23,6 +23,8 @@ namespace kmq {
       void remove_index(const std::string& name);
       bool has_index(const std::string& name);
 
+      void merge(const index& other);
+
       void save() const;
 
       iterator begin();
