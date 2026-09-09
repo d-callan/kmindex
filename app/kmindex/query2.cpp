@@ -20,6 +20,10 @@
 
 #include <atomic_queue/atomic_queue.h>
 
+#ifdef KMINDEX_WITH_COMPRESSION
+  #include <ConfigurationLiterate.h>
+#endif
+
 namespace kmq {
 
   struct fastx_record {
@@ -234,7 +238,7 @@ namespace kmq {
       spdlog::info("Memory budget: {}MB", o->memory_budget);
     memory_semaphore sem(budget_bytes);
 
-    // Memory estimate per sub-index = heap peak + mmap working set.
+    // Memory estimate per sub-index
     //
     // Heap: two phases exist within each task:
     //   Phase 1 (solve_batch): smers + query_response data both live on heap.
@@ -246,23 +250,6 @@ namespace kmq {
     //     stays alive, so phase 2 peak is response data + positions + ratios + counts.
     //   We take the max of both phases.
     //
-    // Mmap: kindex mmaps bloom filter partitions. Without --fast, solve_one maps
-    //   one partition at a time then unmaps it, so peak mmap = bloom_size. With
-    //   --fast, all partitions are mapped upfront and stay resident.
-    //
-    //   For uncompressed indexes, mmap peak = bloom_size (no --fast) or
-    //   index_size (all partitions, --fast).
-    //
-    //   For compressed indexes, partitions are NOT mmap'd — BlockDecompressorZSTD
-    //   reads compressed files and decompresses into heap memory. kindex forces
-    //   m_cache=false for compressed indexes (ignoring --fast), so only one
-    //   partition is decompressed at a time regardless. Peak = bloom_size on heap.
-    //   We count it as mmap for simplicity — the total estimate is approximately
-    //   correct since we sum heap + mmap.
-    //
-    //   Mmap won't cause OOM (OS evicts pages), but too many concurrent indexes
-    //   cause page fault thrashing and I/O stalls. Gating on heap+mmap keeps the
-    //   working set within physical memory to avoid this.
     std::vector<std::pair<std::string, std::size_t>> indexed_mem;
     for (const auto& name : o->index_names)
     {
@@ -287,13 +274,18 @@ namespace kmq {
           phase2 += response_in_agg + positions_mem + ratios_counts;
         }
       }
-      std::size_t heap_peak = std::max(phase1, phase2);
-      std::size_t mmap_peak;
+#ifdef KMINDEX_WITH_COMPRESSION
       if (infos.is_compressed_index())
-        mmap_peak = infos.bloom_size();
-      else
-        mmap_peak = o->cache ? infos.index_size() : infos.bloom_size();
-      indexed_mem.emplace_back(name, heap_peak + mmap_peak);
+      {
+        auto cfg = ConfigurationLiterate(infos.get_compression_config(), true);
+        std::size_t bpb = cfg.get_bit_vectors_per_block();
+        std::size_t cpr_block_size = (bpb * ns) / 8;
+        phase1 += cpr_block_size;
+      }
+#endif
+
+      std::size_t heap_peak = std::max(phase1, phase2);
+      indexed_mem.emplace_back(name, heap_peak);
     }
 
     std::sort(indexed_mem.begin(), indexed_mem.end(),
