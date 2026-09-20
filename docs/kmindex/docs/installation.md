@@ -53,7 +53,7 @@ cd kmindex && ./install.sh # (2)!
 
 !!! tip "`install.sh`"
     ```
-    kmindex build script - v0.5.0.
+    kmindex build script - v0.7.0.
     Usage:
       ./install.sh [-r str] [-t int] [-j int] [-p str] [-k int] [-n] [-h]
     Options:

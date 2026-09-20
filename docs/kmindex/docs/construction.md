@@ -9,7 +9,7 @@
 
 !!! tip "Options"
     ```
-    kmindex build v0.6.0
+    kmindex build v0.7.0
 
     DESCRIPTION
       Build index.
@@ -19,7 +19,7 @@
                     [--km-path <STR>] [-k/--kmer-size <INT>] [-m/--minim-size <INT>]
                     [--hard-min <INT>] [--nb-partitions <INT>] [--bloom-size <INT>]
                     [--nb-cell <INT>] [--bitw <INT>] [-t/--threads <INT>] [-v/--verbose <STR>]
-                    [--cpr] [-h/--help] [--version]
+                    [--cpr] [--static-repart] [-h/--help] [--version]
 
     OPTIONS
       [global]
@@ -38,6 +38,7 @@
            --hard-min      - Min abundance to keep a k-mer. {2}
            --nb-partitions - Number of partitions (0=auto). {0}
            --cpr           - Compress intermediate files. [⚑]
+           --static-repart - Do not estimate repartition by sampling. [⚑]
 
       [presence/absence indexing]
          --bloom-size - Bloom filter size.

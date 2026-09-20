@@ -8,7 +8,7 @@ It works by dividing an index into blocks, which are then compressed using [`Blo
 
 !!! tip "Options"
     ```
-    kmindex compress v0.6.0
+    kmindex compress v0.7.0
 
     DESCRIPTION
       Compress index.

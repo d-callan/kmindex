@@ -6,7 +6,7 @@
 
 !!! tip "Options"
     ```
-    kmindex query v0.6.0
+    kmindex query v0.7.0
 
     DESCRIPTION
       Query index.
@@ -14,22 +14,24 @@
     USAGE
       kmindex query -i/--index <STR> -q/--fastx <STR> [-n/--names <STR>] [-z/--zvalue <INT>]
                     [-r/--threshold <FLOAT>] [-o/--output <STR>] [-s/--single-query <STR>]
-                    [-f/--format <STR>] [-b/--batch-size <INT>] [-t/--threads <INT>]
-                    [-v/--verbose <STR>] [-a/--aggregate] [--fast] [-h/--help] [--version]
+                    [-f/--format <STR>] [-b/--batch-size <INT>] [-B/--batch-size-base <INT>]
+                    [-t/--threads <INT>] [-v/--verbose <STR>] [-a/--aggregate] [--fast]
+                    [-h/--help] [--version]
 
     OPTIONS
       [global]
-        -i --index        - Global index path.
-        -n --names        - Sub-indexes to query, comma separated. {all}
-        -z --zvalue       - Index s-mers and query (s+z)-mers (findere algorithm). {0}
-        -r --threshold    - Shared k-mers threshold. in [0.0, 1.0] {0.0}
-        -o --output       - Output directory. {output}
-        -q --fastx        - Input fasta/q file (supports gz/bzip2) containing the sequence(s) to query.
-        -s --single-query - Query identifier. All sequences are considered as a unique query.
-        -f --format       - Output format [json|matrix|json_vec|jsonl|jsonl_vec] {json}
-        -b --batch-size   - Size of query batches (0≈nb_seq/nb_thread). {0}
-        -a --aggregate    - Aggregate results from batches into one file. [⚑]
-           --fast         - Keep more pages in cache (see doc for details). [⚑]
+        -i --index           - Global index path.
+        -n --names           - Sub-indexes to query, comma separated. {all}
+        -z --zvalue          - Index s-mers and query (s+z)-mers (findere algorithm). {0}
+        -r --threshold       - Shared k-mers threshold. in [0.0, 1.0] {0.0}
+        -o --output          - Output directory. {output}
+        -q --fastx           - Input fasta/q file (supports gz/bzip2) containing the sequence(s) to query.
+        -s --single-query    - Query identifier. All sequences are considered as a unique query.
+        -f --format          - Output format [json|matrix|json_vec|jsonl|jsonl_vec] {json}
+        -b --batch-size      - Size of query batches (0≈nb_seq/nb_thread). {0}
+        -B --batch-size-base - Size of query batches in bases (0=disabled, overrides --batch-size). {0}
+        -a --aggregate       - Aggregate results from batches into one file. [⚑]
+           --fast            - Keep more pages in cache (see doc for details). [⚑]
 
       [common]
         -t --threads - Number of threads. {1}
@@ -44,6 +46,16 @@
 
 !!! warning "--batch-size <INT\>"
     The number of queries in memory is actually `batch-size`$\times$`threads`.
+
+
+!!! tip "--batch-size-base <INT\>"
+    Batches can also be sized in bases instead of sequences, which gives more predictable
+    memory usage when query lengths are heterogeneous (e.g. short reads mixed with contigs).
+    A batch is closed as soon as its cumulated sequence length reaches `batch-size-base`, so
+    a batch may exceed the limit by at most one sequence, and a sequence longer than the limit
+    forms a batch on its own. The number of bases in memory is `batch-size-base`$\times$`threads`.
+
+    `--batch-size-base` takes precedence: when both are set, `--batch-size` is ignored.
 
 
 ### Presence/Absence query
