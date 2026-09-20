@@ -21,6 +21,7 @@ namespace kmq {
     bool cache {false};
     bool aggregate {false};
     bool uncompressed {false};
+    std::size_t memory_budget {0};
   };
 
   using kmq_query2_options_t = std::shared_ptr<struct kmq_query2_options>;
