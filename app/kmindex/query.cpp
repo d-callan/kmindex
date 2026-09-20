@@ -107,6 +107,12 @@ namespace kmq {
        ->checker(bc::check::is_number)
        ->setter(options->batch_size);
 
+    cmd->add_param("-B/--batch-size-base", "Size of query batches in bases (0=disabled, overrides --batch-size).")
+       ->meta("INT")
+       ->def("0")
+       ->checker(bc::check::is_number)
+       ->setter(options->batch_size_base);
+
     cmd->add_param("-a/--aggregate", "Aggregate results from batches into one file.")
        ->as_flag()
        ->setter(options->aggregate);
@@ -166,7 +172,7 @@ namespace kmq {
       bq.free_responses();
 
       std::string output;
-      if (opt->batch_size > 0 || opt->nb_threads > 1)
+      if (opt->batch_size > 0 || opt->batch_size_base > 0 || opt->nb_threads > 1)
       {
         output = fmt::format("{}/batch_{}", opt->output, batch_id);
         fs::create_directories(output);
@@ -282,6 +288,12 @@ namespace kmq {
 
     Timer gtime;
 
+    if (o->batch_size_base > 0 && o->batch_size > 0)
+    {
+      spdlog::warn("--batch-size-base is set, ignoring --batch-size.");
+      o->batch_size = 0;
+    }
+
     index global(o->global_index_path);
 
     spdlog::info(
@@ -356,6 +368,7 @@ namespace kmq {
 
             bool end = false;
             std::size_t nq = 0;
+            std::size_t nb = 0;
             std::size_t id = batch_id.fetch_add(1);
 
             while (!end)
@@ -368,19 +381,24 @@ namespace kmq {
               }
               else
               {
+                nb += record.seq.size();
                 bq.add_query(std::move(record.name), std::move(record.seq));
                 ++nq;
               }
 
-              if ((nq == opt->batch_size || end) && nq > 0)
+              bool full = nq == opt->batch_size
+                       || (opt->batch_size_base > 0 && nb >= opt->batch_size_base);
+
+              if ((full || end) && nq > 0)
               {
-                spdlog::debug("process batch_{} ({} sequences)", id, nq);
+                spdlog::debug("process batch_{} ({} sequences, {} bases)", id, nq, nb);
                 solve_batch(bq, infos, ki, opt, id, timer, aggs);
                 break;
               }
             }
 
             nq = 0;
+            nb = 0;
 
             if (end)
               return;
@@ -400,7 +418,7 @@ namespace kmq {
       }
       else
       {
-        if (o->aggregate && ((o->batch_size > 0) || (o->nb_threads > 1)))
+        if (o->aggregate && ((o->batch_size > 0) || (o->batch_size_base > 0) || (o->nb_threads > 1)))
         {
           std::string ext = format_to_fext(o->format);
 

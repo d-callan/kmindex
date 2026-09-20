@@ -18,6 +18,7 @@ namespace kmq {
     std::size_t z {0};
     double sk_threshold {0};
     std::size_t batch_size {0};
+    std::size_t batch_size_base {0};
     bool cache {false};
     bool aggregate {false};
     bool uncompressed {false};
